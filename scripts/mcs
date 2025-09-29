@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+prog=${0##*/}
+
+usage() {
+  cat >&2 <<EOF
+Usage: $prog <init|start>
+  init: initialize minecraft server
+  start: start minecraft server
+EOF
+  exit 2
+}
+
+[[ $# -ge 1 ]] || usage
+sub=$1
+shift || true
+
+case "$sub" in
+init)
+  exec mcs_init "$@"
+  ;;
+start)
+  exec mcs_start "$@"
+  ;;
+-h | --help | help)
+  usage
+  ;;
+*)
+  echo "$prog: unknown subcommand: $sub" >&2
+  usage
+  ;;
+esac

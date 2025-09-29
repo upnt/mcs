@@ -1,0 +1,34 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+target_dir="${1:-.}"
+
+if [ ! -f "$target_dir/run.sh" ]; then
+  echo "Uninitialized"
+  exit 1
+fi
+
+# ポート自動検出
+port="$(
+  awk -F= '
+      BEGIN{IGNORECASE=1}
+      /^[[:space:]]*server-port[[:space:]]*=/{
+        gsub(/\r/,"",$2); gsub(/[[:space:]]/,"",$2);
+        print $2; exit
+      }' "$target_dir/server.properties" || true
+)"
+[[ -n "${port:-}" ]] || port="25565"
+
+server="$(basename "$(realpath "$target_dir")")"
+
+echo "Starting $server"
+
+docker rm -f "mc-${server}" >/dev/null 2>&1 || true
+exec docker run --rm -it \
+  --name "mc-${server}" \
+  -p "${port}:${port}" \
+  -e JAVA_TOOL_OPTIONS="-Dlog4j2.formatMsgNoLookups=true" \
+  -v "$(realpath "$target_dir"):/app:rw" \
+  -w /app \
+  eclipse-temurin:21-jre \
+  ./run.sh
