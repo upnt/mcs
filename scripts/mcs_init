@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+target_dir="${1:-.}"
+mkdir -p "$target_dir"
+
+server="$(basename "$(realpath "$target_dir")")"
+
+rm -f "$target_dir/run.sh"
+rm -f "$target_dir/eula.txt"
+rm -f "$target_dir/server.jar"
+rm -f "$target_dir/log4j2_17-111.xml"
+rm -f "$target_dir/log4j2_112-116.xml"
+
+script_path="$(readlink -f "$0")"
+script_dir="$(dirname "$script_path")"
+resource_dir="$(realpath "$script_dir/../resources")"
+patch_dir="$(realpath "$script_dir/../patches")"
+
+# version選択
+version="${server##*_}"
+jarfile="$resource_dir/$version.jar"
+
+if [ ! -f "$jarfile" ]; then
+  echo "$version.jar not found"
+  exit 1
+fi
+cp "$jarfile" "$target_dir/server.jar"
+
+jvm_args=""
+
+# log4j2対策
+case "$version" in
+1.7* | 1.8* | 1.9* | 1.10* | 1.11*)
+  cp "$patch_dir/log4j2_17-111.xml" "$target_dir/log4j2_17-111.xml"
+  jvm_args="-Dlog4j.configurationFile=log4j2_17-111.xml"
+  ;;
+1.12* | 1.13* | 1.14* | 1.15* | 1.16*)
+  cp "$patch_dir/log4j2_112-116.xml" "$target_dir/log4j2_112-116.xml"
+  jvm_args="-Dlog4j.configurationFile=log4j2_112-116.xml"
+  ;;
+1.17* | 1.18*)
+  jvm_args="-Dlog4j2.formatMsgNoLookups=true"
+  ;;
+1.19* | 1.20* | 1.21* | 1.22* | 1.23* | 1.24* | 1.25*)
+  # 1.19以降は対策不要
+  ;;
+*)
+  echo "Error: Unsupported or too old version ($version)" >&2
+  exit 1
+  ;;
+esac
+
+# メモリサイズ指定
+read -rp "Enter memory size in MB [default 1024MB]: " mem
+
+if [[ -z "$mem" ]]; then
+  mem=1024
+fi
+
+# ポート自動検出
+port="25565"
+if [[ -f "$target_dir/server.properties" ]]; then
+  port="$(
+    awk -F= '
+      BEGIN{IGNORECASE=1}
+      /^[[:space:]]*server-port[[:space:]]*=/{
+        gsub(/\r/,"",$2); gsub(/[[:space:]]/,"",$2);
+        print $2; exit
+      }' "$target_dir/server.properties" || true
+  )"
+  [[ -n "${port:-}" ]] || port="25565"
+fi
+
+# run.sh を生成
+cat >"$target_dir/run.sh" <<EOF
+#!/bin/bash
+set -euo pipefail
+java -Xmx${mem}M -Xms${mem}M ${jvm_args} -jar server.jar nogui
+EOF
+chmod u+x "$target_dir/run.sh"
+
+# 初回起動
+echo "Starting initial server launch..."
+
+docker rm -f "mc-${server}" >/dev/null 2>&1 || true
+exec docker run --rm -it \
+  --name "mc-${server}" \
+  --user "$(id -u):$(id -g)" \
+  -e JAVA_TOOL_OPTIONS="-Dlog4j2.formatMsgNoLookups=true" \
+  -p "${port}:${port}" \
+  -v "$(realpath "$target_dir"):/app:rw" \
+  -w /app \
+  eclipse-temurin:21-jre \
+  ./run.sh
+
+echo
+echo "Done. Check $target_dir/eula.txt and set eula=true before starting."
