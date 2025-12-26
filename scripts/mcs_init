@@ -17,9 +17,28 @@ script_dir="$(dirname "$script_path")"
 resource_dir="$(realpath "$script_dir/../resources")"
 patch_dir="$(realpath "$script_dir/../patches")"
 
-# version選択
-version="${server##*_}"
-jarfile="$resource_dir/$version.jar"
+# version 選択
+suffix="${server##*_}"
+
+impl=""
+version=""
+
+if [[ "$suffix" =~ ^([0-9].+)$ ]]; then
+  impl="vanilla"
+  version="${BASH_REMATCH[1]}"
+  jarfile="$resource_dir/${version}.jar"
+elif [[ "$suffix" =~ ^(vanilla|paper|fabric|spigot|purpur)-([0-9].+)$ ]]; then
+  impl="${BASH_REMATCH[1]}"
+  version="${BASH_REMATCH[2]}"
+  jarfile="$resource_dir/${impl}-${version}.jar"
+else
+  echo "Error: unsupported server name suffix: '$suffix'" >&2
+  echo "Expected: servername_1.21.10 or servername_paper-1.21.10 etc." >&2
+  exit 1
+fi
+
+echo "Server impl : $impl"
+echo "Server version: $version"
 
 if [ ! -f "$jarfile" ]; then
   echo "$version.jar not found"
@@ -30,23 +49,45 @@ cp "$jarfile" "$target_dir/server.jar"
 jvm_args=""
 
 # log4j2対策
-case "$version" in
-1.7* | 1.8* | 1.9* | 1.10* | 1.11*)
-  cp "$patch_dir/log4j2_17-111.xml" "$target_dir/log4j2_17-111.xml"
-  jvm_args="-Dlog4j.configurationFile=log4j2_17-111.xml"
+case "$impl" in
+vanilla)
+  case "$version" in
+  1.7* | 1.8* | 1.9* | 1.10* | 1.11*)
+    cp "$patch_dir/log4j2_17-111.xml" "$target_dir/log4j2_17-111.xml"
+    jvm_args="-Dlog4j.configurationFile=log4j2_17-111.xml"
+    ;;
+  1.12* | 1.13* | 1.14* | 1.15* | 1.16*)
+    cp "$patch_dir/log4j2_112-116.xml" "$target_dir/log4j2_112-116.xml"
+    jvm_args="-Dlog4j.configurationFile=log4j2_112-116.xml"
+    ;;
+  1.17* | 1.18*)
+    jvm_args="-Dlog4j2.formatMsgNoLookups=true"
+    ;;
+  1.19* | 1.20* | 1.21* | 1.22* | 1.23* | 1.24* | 1.25*)
+    # 1.19以降は対策不要
+    ;;
+  *)
+    echo "Error: Unsupported or too old version in vanilla ($version)" >&2
+    exit 1
+    ;;
+  esac
   ;;
-1.12* | 1.13* | 1.14* | 1.15* | 1.16*)
-  cp "$patch_dir/log4j2_112-116.xml" "$target_dir/log4j2_112-116.xml"
-  jvm_args="-Dlog4j.configurationFile=log4j2_112-116.xml"
-  ;;
-1.17* | 1.18*)
-  jvm_args="-Dlog4j2.formatMsgNoLookups=true"
-  ;;
-1.19* | 1.20* | 1.21* | 1.22* | 1.23* | 1.24* | 1.25*)
-  # 1.19以降は対策不要
+paper | spigot)
+  case "$version" in
+  1.9* | 1.10* | 1.11* | \
+    1.12* | 1.13* | 1.14* | 1.15* | 1.16* | \
+    1.17* | 1.18* | 1.19* | 1.20* | 1.21*)
+    # OK: builtin mitigation
+    ;;
+  *)
+    echo "Error: $impl $version is not in the approved version list." >&2
+    echo "       Add an explicit rule before using this version." >&2
+    exit 1
+    ;;
+  esac
   ;;
 *)
-  echo "Error: Unsupported or too old version ($version)" >&2
+  echo "Error: Unsupported impl ($impl)" >&2
   exit 1
   ;;
 esac
